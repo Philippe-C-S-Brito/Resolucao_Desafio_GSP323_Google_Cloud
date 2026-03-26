@@ -18,11 +18,11 @@ Antes de rodar o script, olhe para o **painel lateral esquerdo** do seu laborat�
 1. Abra o **Cloud Shell** (o terminal preto) no painel do Google Cloud.
 2. Copie e cole o comando abaixo no terminal e aperte `ENTER`. Ele fará o download do script, dará as permissões e começará a execução automaticamente:
 
-\`\`\`bash
+```bash
 curl -LO https://raw.githubusercontent.com/Philippe-C-S-Brito/Resolucao_Desafio_GSP323_Google_Cloud/main/desafio_gsp323.sh
 sudo chmod +x desafio_gsp323.sh
 ./desafio_gsp323.sh
-\`\`\`
+```
 
 3. O script vai pausar e perguntar pelas **7 informações** que você separou no Passo 1. Cole uma a uma e aperte `ENTER`.
 4. Aguarde a finalização. Quando a mensagem `✅ SCRIPT FINALIZADO!` aparecer, você já poderá validar as tarefas 2, 3 e 4. 
