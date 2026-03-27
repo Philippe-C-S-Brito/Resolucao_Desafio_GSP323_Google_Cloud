@@ -1,127 +1,147 @@
 #!/bin/bash
 
 # Definição de Cores
-BLACK_TEXT=$'\033[0;90m'
-RED_TEXT=$'\033[0;91m'
+CYAN_TEXT=$'\033[0;96m'
 GREEN_TEXT=$'\033[0;92m'
 YELLOW_TEXT=$'\033[0;93m'
-BLUE_TEXT=$'\033[0;94m'
 MAGENTA_TEXT=$'\033[0;95m'
-CYAN_TEXT=$'\033[0;96m'
+BLUE_TEXT=$'\033[0;94m'
 WHITE_TEXT=$'\033[0;97m'
-
-NO_COLOR=$'\033[0m'
 RESET_FORMAT=$'\033[0m'
-
 BOLD_TEXT=$'\033[1m'
-UNDERLINE_TEXT=$'\033[4m'
 
 clear
 
-# Mensagem de Boas-vindas
 echo "${CYAN_TEXT}${BOLD_TEXT}==================================================================${RESET_FORMAT}"
 echo "${CYAN_TEXT}${BOLD_TEXT}          INICIANDO A EXECUÇÃO DO LABORATÓRIO GSP323...           ${RESET_FORMAT}"
 echo "${CYAN_TEXT}${BOLD_TEXT}==================================================================${RESET_FORMAT}"
 echo
 
-echo -e "${CYAN_TEXT}${BOLD_TEXT}--- CONFIGURAÇÃO DO AMBIENTE GCP ---${RESET_FORMAT}"
+echo "${YELLOW_TEXT}${BOLD_TEXT}Preencha com os dados do painel do seu laboratório:${RESET_FORMAT}"
+echo
 
-export PROJECT_ID=$(gcloud config get-value project)
+read -p "1. ID do Projeto (ex: qwiklabs-gcp-...): " PROJECT_ID
+read -p "2. Nome do Dataset do BigQuery (ex: lab_892): " DATASET_NAME
+read -p "3. Nome da Tabela do BigQuery (ex: customers_451): " TABLE_NAME
+read -p "4. Nome do Bucket (ex: qwiklabs-gcp-...-marking): " BUCKET_NAME
+echo "${MAGENTA_TEXT}ATENÇÃO: Nos itens 5 e 6, cole APENAS O NOME DO ARQUIVO FINAL. Ex: task3-gcs-963.result${RESET_FORMAT}"
+read -p "5. Arquivo de resultado da Tarefa 3: " SPEECH_FILE
+read -p "6. Arquivo de resultado da Tarefa 4: " NL_FILE
+read -p "7. Região do Laboratório (ex: us-east1 ou us-central1): " REGION
 
-read -p "$(echo -e ${YELLOW_TEXT}"Digite a REGIÃO do laboratório (ex: us-central1): "${RESET_FORMAT})" REGION
-read -p "$(echo -e ${YELLOW_TEXT}"Digite o nome do DATASET do BigQuery: "${RESET_FORMAT})" DATASET
-read -p "$(echo -e ${YELLOW_TEXT}"Digite o nome da TABELA do BigQuery: "${RESET_FORMAT})" TABLE
-read -p "$(echo -e ${MAGENTA_TEXT}"Digite a URI completa da Tarefa 3 (ex: gs://.../arquivo.result): "${RESET_FORMAT})" TASK3_OUTPUT
-read -p "$(echo -e ${MAGENTA_TEXT}"Digite a URI completa da Tarefa 4 (ex: gs://.../arquivo.result): "${RESET_FORMAT})" TASK4_OUTPUT
+# Limpeza de variáveis (remove "gs://" se o aluno colar por engano)
+SPEECH_FILE="${SPEECH_FILE##*/}"
+NL_FILE="${NL_FILE##*/}"
 
-export BUCKET="${PROJECT_ID}-marking"
-export TEMP_LOCATION="gs://${BUCKET}/temp"
-export BQ_TEMP="gs://${BUCKET}/bigquery_temp"
+echo ""
+echo "${GREEN_TEXT}${BOLD_TEXT}⚙️ Configurando Ambiente e Rede...${RESET_FORMAT}"
+gcloud config set project $PROJECT_ID --quiet
+gcloud config set compute/region $REGION --quiet
 
-echo -e "\n${GREEN_TEXT}${BOLD_TEXT}Configuração concluída. Iniciando os processos...${RESET_FORMAT}\n"
+# Busca dinamicamente a 1ª zona válida da região
+ZONE=$(gcloud compute zones list --filter="region:($REGION)" --format="value(name)" --limit=1)
+gcloud config set compute/zone $ZONE --quiet
 
-# --- TAREFA 1: Dataflow ---
-echo -e "\n${YELLOW_TEXT}${BOLD_TEXT}Iniciando Tarefa 1: Dataflow...${RESET_FORMAT}"
+# Habilita rede interna para o Dataproc não falhar (Private Google Access e Firewall)
+gcloud compute networks subnets update default --region=$REGION --enable-private-ip-google-access --quiet || true
+gcloud compute firewall-rules create allow-internal-dataproc --network default --allow tcp,udp,icmp --source-ranges 10.128.0.0/9 --quiet || true
 
-# Criando recursos base
-bq mk $DATASET 2>/dev/null || echo "Dataset já existe."
-gsutil mb -l $REGION gs://$BUCKET 2>/dev/null || echo "Bucket já existe."
+echo ""
+echo "${YELLOW_TEXT}${BOLD_TEXT}🚀 TAREFA 1: Dataflow, BigQuery e Cloud Storage${RESET_FORMAT}"
+bq mk --location=$REGION $DATASET_NAME 2>/dev/null || true
 
-# Executando Job do Dataflow
+# Escrevendo o schema estendido para evitar erros de formatação JSON
+cat <<EOF > lab.schema
+[
+    {"type":"STRING","name":"guid"},
+    {"type":"BOOLEAN","name":"isActive"},
+    {"type":"STRING","name":"firstname"},
+    {"type":"STRING","name":"surname"},
+    {"type":"STRING","name":"company"},
+    {"type":"STRING","name":"email"},
+    {"type":"STRING","name":"phone"},
+    {"type":"STRING","name":"address"},
+    {"type":"STRING","name":"about"},
+    {"type":"TIMESTAMP","name":"registered"},
+    {"type":"FLOAT","name":"latitude"},
+    {"type":"FLOAT","name":"longitude"}
+]
+EOF
+
+bq mk --table $PROJECT_ID:$DATASET_NAME.$TABLE_NAME lab.schema 2>/dev/null || true
+gsutil mb -p $PROJECT_ID -l $REGION gs://$BUCKET_NAME/ 2>/dev/null || true
+
 gcloud dataflow jobs run batch-job-task1 \
-  --gcs-location gs://dataflow-templates-$REGION/latest/GCS_Text_to_BigQuery \
-  --region $REGION \
-  --worker-machine-type e2-standard-2 \
-  --staging-location $TEMP_LOCATION \
-  --parameters \
+    --gcs-location gs://dataflow-templates/latest/GCS_Text_to_BigQuery \
+    --region $REGION \
+    --worker-machine-type e2-standard-2 \
+    --staging-location gs://$BUCKET_NAME/temp \
+    --parameters \
 javascriptTextTransformFunctionName=transform,\
 JSONPath=gs://spls/gsp323/lab.schema,\
 javascriptTextTransformGcsPath=gs://spls/gsp323/lab.js,\
 inputFilePattern=gs://spls/gsp323/lab.csv,\
-outputTable=$PROJECT_ID:$DATASET.$TABLE,\
-bigQueryLoadingTemporaryDirectory=$BQ_TEMP
+outputTable=$PROJECT_ID:$DATASET_NAME.$TABLE_NAME,\
+bigQueryLoadingTemporaryDirectory=gs://$BUCKET_NAME/bigquery_temp --quiet || true
 
-# --- TAREFA 2: Dataproc ---
-echo -e "\n${MAGENTA_TEXT}${BOLD_TEXT}Iniciando Tarefa 2: Criação do Cluster Dataproc...${RESET_FORMAT}"
-sleep 10
+echo ""
+echo "${BLUE_TEXT}${BOLD_TEXT}🧠 TAREFA 2: Cluster e Job do Dataproc (Com Verificação de Rede)${RESET_FORMAT}"
+gcloud dataproc clusters delete cluster-desafio --region=$REGION --quiet 2>/dev/null || true
 
-gcloud dataproc clusters create cluster-task2 \
-    --region=$REGION \
-    --num-workers 2 \
-    --master-machine-type e2-standard-2 \
-    --master-boot-disk-type pd-balanced \
-    --master-boot-disk-size 100 \
-    --worker-machine-type e2-standard-2 \
-    --worker-boot-disk-type pd-balanced \
-    --worker-boot-disk-size 100 \
-    --image-version 2.0-debian10 \
-    --project $PROJECT_ID
+# Loop blindado para criação do Dataproc (Tenta 4 vezes caso a rede atrase)
+for i in {1..4}; do
+    gcloud dataproc clusters create cluster-desafio \
+        --region=$REGION \
+        --zone=$ZONE \
+        --master-machine-type=e2-standard-2 \
+        --master-boot-disk-type=pd-balanced \
+        --master-boot-disk-size=100GB \
+        --worker-machine-type=e2-standard-2 \
+        --worker-boot-disk-type=pd-balanced \
+        --worker-boot-disk-size=100GB \
+        --num-workers=2 \
+        --project=$PROJECT_ID --quiet && break
+    echo "⚠️ A rede do laboratório ainda está carregando. Tentando novamente em 30 segundos..."
+    sleep 30
+done
 
-sleep 10
+echo "-> Aguardando liberação da porta SSH (30 segundos)..."
+sleep 30
 
-# Busca automaticamente o nome da VM e a Zona
-export MASTER_NODE=$(gcloud compute instances list --filter="name ~ cluster-task2-m" --format="value(name)")
-export MASTER_ZONE=$(gcloud compute instances list --filter="name ~ cluster-task2-m" --format="value(zone)")
+# Loop blindado para SSH
+for i in {1..4}; do
+    gcloud compute ssh cluster-desafio-m --zone=$ZONE --quiet --command="hdfs dfs -cp gs://spls/gsp323/data.txt /data.txt" && break
+    echo "⚠️ Conexão SSH recusada temporariamente. Tentando novamente em 20 segundos..."
+    sleep 20
+done
 
-echo -e "${BLUE_TEXT}Conectando à VM: $MASTER_NODE na Zona: $MASTER_ZONE${RESET_FORMAT}"
-
-# Acesso via SSH e cópia de dados
-gcloud compute ssh $MASTER_NODE --zone=$MASTER_ZONE --quiet --command="gsutil cp gs://spls/gsp323/data.txt . && hdfs dfs -put data.txt /data.txt"
-
-# Submetendo Job do Spark
-echo -e "${BLUE_TEXT}Enviando o Job do Spark...${RESET_FORMAT}"
 gcloud dataproc jobs submit spark \
-    --cluster=cluster-task2 \
+    --cluster=cluster-desafio \
     --region=$REGION \
     --class=org.apache.spark.examples.SparkPageRank \
     --jars=file:///usr/lib/spark/examples/jars/spark-examples.jar \
     --max-failures-per-hour=1 \
-    -- /data.txt
+    --quiet \
+    -- /data.txt || true
 
-# --- TAREFA 3: API Speech-to-Text ---
-echo -e "\n${YELLOW_TEXT}${BOLD_TEXT}Iniciando Tarefa 3: API Speech-to-Text...${RESET_FORMAT}"
+echo ""
+echo "${MAGENTA_TEXT}${BOLD_TEXT}🎙️ TAREFAS 3 e 4: APIs de IA${RESET_FORMAT}"
 
-# Habilitando APIs necessárias
-gcloud services enable apikeys.googleapis.com
-gcloud services enable speech.googleapis.com
+# Ativando as APIs necessárias (Speech, Language e API Keys)
+gcloud services enable apikeys.googleapis.com \
+                       speech.googleapis.com \
+                       language.googleapis.com --quiet
 
-# Criando Chave de API
-gcloud alpha services api-keys create --display-name="ml-api-key"
+gcloud alpha services api-keys create --display-name="ml-api-key" --quiet
 
-echo -e "${CYAN_TEXT}Aguardando a propagação da Chave de API (cerca de 30 segundos)...${RESET_FORMAT}"
+echo "Aguardando 30 segundos para a propagação da Chave de API..."
 sleep 30
 
-# Recuperando a chave criada
-KEY_NAME=$(gcloud alpha services api-keys list \
---format="value(name)" \
---filter="displayName=ml-api-key" \
---limit=1)
+KEY_NAME=$(gcloud alpha services api-keys list --format="value(name)" --filter="displayName=ml-api-key" --limit=1)
+API_KEY=$(gcloud alpha services api-keys get-key-string "$KEY_NAME" --format="value(keyString)")
 
-API_KEY=$(gcloud alpha services api-keys get-key-string "$KEY_NAME" \
---format="value(keyString)")
-
-# Criando arquivo de requisição
-cat > request.json <<EOF
+# TAREFA 3: Speech to Text
+cat <<EOF > speech_req.json
 {
   "config": {
     "encoding": "FLAC",
@@ -133,26 +153,22 @@ cat > request.json <<EOF
 }
 EOF
 
-# Chamando a API Speech-to-Text
-curl -s -X POST -H "Content-Type: application/json" \
---data-binary @request.json \
-"https://speech.googleapis.com/v1/speech:recognize?key=${API_KEY}" \
-> result_task3.json
+curl -s -X POST -H "Content-Type: application/json" --data-binary @speech_req.json "https://speech.googleapis.com/v1/speech:recognize?key=${API_KEY}" > result_speech.json
 
-# Enviando resultado para o Cloud Storage
-gsutil -h "Content-Type: application/json" cp result_task3.json $TASK3_OUTPUT
+# Upload forçando o cabeçalho JSON
+gsutil -h "Content-Type: application/json" cp result_speech.json gs://$BUCKET_NAME/$SPEECH_FILE
 
-# --- TAREFA 4: API Natural Language ---
-echo -e "\n${YELLOW_TEXT}${BOLD_TEXT}Iniciando Tarefa 4: API Natural Language...${RESET_FORMAT}"
+# TAREFA 4: Natural Language
+gcloud ml language analyze-entities --content="Old Norse texts portray Odin as one-eyed and long-bearded, frequently wielding a spear named Gungnir and wearing a cloak and a broad hat." > result_nl.json
 
-gcloud ml language analyze-entities --content="Old Norse texts portray Odin as one-eyed and long-bearded, frequently wielding a spear named Gungnir and wearing a cloak and a broad hat." > result_task4.json
+# Upload forçando o cabeçalho JSON
+gsutil -h "Content-Type: application/json" cp result_nl.json gs://$BUCKET_NAME/$NL_FILE
 
-gsutil -h "Content-Type: application/json" cp result_task4.json $TASK4_OUTPUT
-
-echo
+echo ""
 echo "${CYAN_TEXT}${BOLD_TEXT}=======================================================${RESET_FORMAT}"
 echo "${GREEN_TEXT}${BOLD_TEXT}            LABORATÓRIO CONCLUÍDO COM SUCESSO!         ${RESET_FORMAT}"
 echo "${CYAN_TEXT}${BOLD_TEXT}=======================================================${RESET_FORMAT}"
-echo "${WHITE_TEXT}Verifique no painel do laboratório se todas as tarefas${RESET_FORMAT}"
-echo "${WHITE_TEXT}foram validadas corretamente.${RESET_FORMAT}"
-echo
+echo "${WHITE_TEXT}As tarefas 2, 3 e 4 já podem ser validadas.${RESET_FORMAT}"
+echo "${WHITE_TEXT}Aguarde o Dataflow concluir (Status: Succeeded) no painel${RESET_FORMAT}"
+echo "${WHITE_TEXT}para validar a Tarefa 1!${RESET_FORMAT}"
+echo ""
