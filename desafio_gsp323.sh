@@ -71,16 +71,17 @@ EOF
 bq mk --table $PROJECT_ID:$DATASET_NAME.$TABLE_NAME lab.schema 2>/dev/null || true
 gsutil mb -p $PROJECT_ID -l $REGION gs://$BUCKET_NAME/ 2>/dev/null || true
 
+# ATUALIZAÇÃO: Uso de variável de região no template e bucket cloud-training em vez de spls
 gcloud dataflow jobs run batch-job-task1 \
-    --gcs-location gs://dataflow-templates/latest/GCS_Text_to_BigQuery \
+    --gcs-location gs://dataflow-templates-$REGION/latest/GCS_Text_to_BigQuery \
     --region $REGION \
     --worker-machine-type e2-standard-2 \
     --staging-location gs://$BUCKET_NAME/temp \
     --parameters \
 javascriptTextTransformFunctionName=transform,\
-JSONPath=gs://spls/gsp323/lab.schema,\
-javascriptTextTransformGcsPath=gs://spls/gsp323/lab.js,\
-inputFilePattern=gs://spls/gsp323/lab.csv,\
+JSONPath=gs://cloud-training/gsp323/lab.schema,\
+javascriptTextTransformGcsPath=gs://cloud-training/gsp323/lab.js,\
+inputFilePattern=gs://cloud-training/gsp323/lab.csv,\
 outputTable=$PROJECT_ID:$DATASET_NAME.$TABLE_NAME,\
 bigQueryLoadingTemporaryDirectory=gs://$BUCKET_NAME/bigquery_temp --quiet || true
 
@@ -89,8 +90,10 @@ echo "${BLUE_TEXT}${BOLD_TEXT}🧠 TAREFA 2: Cluster e Job do Dataproc (Com Veri
 gcloud dataproc clusters delete cluster-desafio --region=$REGION --quiet 2>/dev/null || true
 
 # Loop blindado para criação do Dataproc (Tenta 4 vezes caso a rede atrase)
+# ATUALIZAÇÃO: Inclusão de component-gateway e image-version
 for i in {1..4}; do
     gcloud dataproc clusters create cluster-desafio \
+        --enable-component-gateway \
         --region=$REGION \
         --zone=$ZONE \
         --master-machine-type=e2-standard-2 \
@@ -100,6 +103,7 @@ for i in {1..4}; do
         --worker-boot-disk-type=pd-balanced \
         --worker-boot-disk-size=100GB \
         --num-workers=2 \
+        --image-version=2.2-debian12 \
         --project=$PROJECT_ID --quiet && break
     echo "⚠️ A rede do laboratório ainda está carregando. Tentando novamente em 30 segundos..."
     sleep 30
@@ -109,8 +113,9 @@ echo "-> Aguardando liberação da porta SSH (30 segundos)..."
 sleep 30
 
 # Loop blindado para SSH
+# ATUALIZAÇÃO: Mudança do bucket base de spls para cloud-training
 for i in {1..4}; do
-    gcloud compute ssh cluster-desafio-m --zone=$ZONE --quiet --command="hdfs dfs -cp gs://spls/gsp323/data.txt /data.txt" && break
+    gcloud compute ssh cluster-desafio-m --zone=$ZONE --quiet --command="hdfs dfs -cp gs://cloud-training/gsp323/data.txt /data.txt" && break
     echo "⚠️ Conexão SSH recusada temporariamente. Tentando novamente em 20 segundos..."
     sleep 20
 done
@@ -141,6 +146,7 @@ KEY_NAME=$(gcloud alpha services api-keys list --format="value(name)" --filter="
 API_KEY=$(gcloud alpha services api-keys get-key-string "$KEY_NAME" --format="value(keyString)")
 
 # TAREFA 3: Speech to Text
+# ATUALIZAÇÃO: Mudança do bucket de áudio para cloud-training
 cat <<EOF > speech_req.json
 {
   "config": {
@@ -148,7 +154,7 @@ cat <<EOF > speech_req.json
     "languageCode": "en-US"
   },
   "audio": {
-    "uri": "gs://spls/gsp323/task3.flac"
+    "uri": "gs://cloud-training/gsp323/task3.flac"
   }
 }
 EOF
@@ -166,7 +172,7 @@ gsutil -h "Content-Type: application/json" cp result_nl.json gs://$BUCKET_NAME/$
 
 echo ""
 echo "${CYAN_TEXT}${BOLD_TEXT}=======================================================${RESET_FORMAT}"
-echo "${GREEN_TEXT}${BOLD_TEXT}            LABORATÓRIO CONCLUÍDO COM SUCESSO!         ${RESET_FORMAT}"
+echo "${GREEN_TEXT}${BOLD_TEXT}           LABORATÓRIO CONCLUÍDO COM SUCESSO!          ${RESET_FORMAT}"
 echo "${CYAN_TEXT}${BOLD_TEXT}=======================================================${RESET_FORMAT}"
 echo "${WHITE_TEXT}As tarefas 2, 3 e 4 já podem ser validadas.${RESET_FORMAT}"
 echo "${WHITE_TEXT}Aguarde o Dataflow concluir (Status: Succeeded) no painel${RESET_FORMAT}"
