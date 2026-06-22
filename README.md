@@ -19,7 +19,7 @@ Antes de rodar o script, olhe para o **painel lateral esquerdo** do seu laborat�
 2. Copie e cole o comando abaixo no terminal e aperte `ENTER`. Ele fará o download do script, dará as permissões e começará a execução automaticamente:
 
 ```bash
-curl -LO https://raw.githubusercontent.com/Philippe-C-S-Brito/Resolucao_Desafio_GSP323_Google_Cloud/main/desafio_gsp323.sh
+curl -LO [https://raw.githubusercontent.com/Philippe-C-S-Brito/Resolucao_Desafio_GSP323_Google_Cloud/main/desafio_gsp323.sh](https://raw.githubusercontent.com/Philippe-C-S-Brito/Resolucao_Desafio_GSP323_Google_Cloud/main/desafio_gsp323.sh)
 sudo chmod +x desafio_gsp323.sh
 ./desafio_gsp323.sh
 ```
@@ -29,6 +29,8 @@ sudo chmod +x desafio_gsp323.sh
 5. Para a **Tarefa 1**, vá no menu `Dataflow > Jobs` no console e espere o status ficar verde (`Succeeded`) antes de validar.
 
 Bons estudos!
+
+---
 
 # Guia Explicativo: Perform Foundational Data, ML, and AI Tasks (GSP323)
 
@@ -58,8 +60,8 @@ O script cria um *Dataset* e uma tabela vazia no **BigQuery** (`bq mk`), aplican
 
 ### 2. Job do Dataflow
 O comando `gcloud dataflow jobs run` inicia o processamento real. 
-* **O Template:** Utilizamos um modelo pré-pronto do Google chamado `GCS_Text_to_BigQuery`.
-* **A Lógica:** Ele lê um arquivo de texto (CSV) armazenado em um bucket público do laboratório, aplica uma função de transformação em JavaScript (UDF) para limpar os dados, e insere o resultado final diretamente na tabela do BigQuery criada no passo anterior.
+* **O Template:** Utilizamos um modelo pré-pronto do Google chamado `GCS_Text_to_BigQuery`, que agora é executado apontando diretamente para a região do laboratório (`gs://dataflow-templates-$REGION/...`) para garantir total compatibilidade.
+* **A Lógica:** Ele lê um arquivo de texto (CSV) armazenado no atual bucket público de treinamento do Google (`gs://cloud-training/...`), aplica uma função de transformação em JavaScript (UDF) para limpar os dados, e insere o resultado final diretamente na tabela do BigQuery criada no passo anterior.
 
 ---
 
@@ -68,10 +70,11 @@ O comando `gcloud dataflow jobs run` inicia o processamento real.
 O **Cloud Dataproc** é o serviço do Google para rodar clusters de Apache Hadoop e Spark gerenciados.
 
 ### 1. Criação do Cluster
-O script provisiona um cluster chamado `cluster-desafio` com uma máquina *Master* e duas máquinas *Workers*. Há um "loop de repetição" (`for i in {1..4}`) implementado aqui. Isso ocorre porque, em laboratórios recém-iniciados, a rede pode demorar a ficar pronta, então o script tenta criar o cluster até 4 vezes caso dê erro.
+O script provisiona um cluster chamado `cluster-desafio` com uma máquina *Master* e duas máquinas *Workers*. Além disso, ele habilita o **Component Gateway** e fixa a versão da imagem em `2.2-debian12`, garantindo que o cluster suba sem erros de incompatibilidade de versão. 
+Há um "loop de repetição" (`for i in {1..4}`) implementado aqui. Isso ocorre porque, em laboratórios recém-iniciados, a rede pode demorar a ficar pronta, então o script tenta criar o cluster até 4 vezes caso dê erro.
 
 ### 2. Movimentando os Dados para o HDFS
-HDFS é o sistema de arquivos distribuído do Hadoop. O script usa o comando SSH (`gcloud compute ssh`) para se conectar ao nó master e copiar um arquivo de texto do Cloud Storage (`gs://spls/gsp323/data.txt`) para dentro do disco do cluster (`/data.txt`).
+HDFS é o sistema de arquivos distribuído do Hadoop. O script usa o comando SSH (`gcloud compute ssh`) para se conectar ao nó master e copiar um arquivo de texto do Cloud Storage (`gs://cloud-training/gsp323/data.txt`) para dentro do disco do cluster (`/data.txt`).
 
 ### 3. Rodando o Job Spark
 Enviamos um job do tipo Spark (`gcloud dataproc jobs submit spark`) executando a classe `SparkPageRank`. É um algoritmo clássico de análise de links (o mesmo princípio que o Google usava para ranquear páginas web) rodando de forma distribuída nos *workers*.
@@ -84,7 +87,7 @@ A nuvem não é feita só de infraestrutura; aqui usamos modelos de IA pré-trei
 
 ### Tarefa 3: Cloud Speech-to-Text API
 Nesta etapa, convertemos áudio em texto.
-* O script cria um arquivo de requisição (`speech_req.json`) apontando para um arquivo de áudio FLAC hospedado no Cloud Storage.
+* O script cria um arquivo de requisição (`speech_req.json`) apontando para um arquivo de áudio FLAC atualizado e hospedado no Cloud Storage (`gs://cloud-training/gsp323/task3.flac`).
 * Usamos o comando `curl` para fazer uma chamada HTTP POST (REST API) para o serviço Speech-to-Text.
 * O resultado da transcrição é salvo em um JSON e enviado para o seu *Bucket* pessoal.
 
